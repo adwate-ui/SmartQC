@@ -1,0 +1,5 @@
+{
+  "name": "SmartQC - Product Identity & Quality Control",
+  "description": "A PWA for identifying products via image recognition and performing detailed AI-driven quality control inspections.",
+  "requestFramePermissions": []
+}
