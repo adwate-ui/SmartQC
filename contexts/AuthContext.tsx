@@ -1,5 +1,4 @@
-
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { User } from '../types';
 import { supabase } from '../lib/supabaseClient';
 
@@ -23,6 +22,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Use a ref to track if we've already handled the initial load to prevent double-firing
+  const initRef = useRef(false);
 
   // Helper: Get API Key
   const fetchApiKey = async (userId: string): Promise<string | null> => {
@@ -34,7 +36,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single();
       
       if (error) {
-        // code PGRST116 means 0 rows found, which is expected for new users
         if (error.code !== 'PGRST116') {
           console.error("DB Error fetching API Key:", error);
         }
@@ -47,27 +48,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const handleUserSession = async (sessionUser: any) => {
+      const userData: User = {
+        id: sessionUser.id,
+        email: sessionUser.email!,
+        name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0],
+        avatar_url: sessionUser.user_metadata?.avatar_url
+      };
+      setUser(userData);
+      
+      // Fetch key
+      const key = await fetchApiKey(sessionUser.id);
+      setApiKey(key);
+  };
+
   useEffect(() => {
     let mounted = true;
 
     const initAuth = async () => {
-      try {
-        // 1. Get Session
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user && mounted) {
-          // 2. Set User
-          const userData: User = {
-            id: session.user.id,
-            email: session.user.email!,
-            name: session.user.user_metadata?.name || session.user.email?.split('@')[0],
-            avatar_url: session.user.user_metadata?.avatar_url
-          };
-          setUser(userData);
+      if (initRef.current) return;
+      initRef.current = true;
 
-          // 3. Fetch Key (Blocking)
-          const key = await fetchApiKey(session.user.id);
-          if (mounted) setApiKey(key);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) throw error;
+
+        if (session?.user && mounted) {
+          await handleUserSession(session.user);
         }
       } catch (e) {
         console.error("Auth init failed:", e);
@@ -78,35 +86,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     initAuth();
 
-    // 4. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
+      // Ignore INITIAL_SESSION as we handle it in initAuth explicitly
+      if (event === 'INITIAL_SESSION') return;
+
       if (event === 'SIGNED_IN') {
-        // Force loading true while we resolve the user profile and key
         setLoading(true);
         if (session?.user) {
-          const userData: User = {
-            id: session.user.id,
-            email: session.user.email!,
-            name: session.user.user_metadata?.name || session.user.email?.split('@')[0],
-            avatar_url: session.user.user_metadata?.avatar_url
-          };
-          setUser(userData);
-          const key = await fetchApiKey(session.user.id);
-          setApiKey(key);
+          await handleUserSession(session.user);
         }
         setLoading(false);
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setApiKey(null);
         setLoading(false);
+      } else if (event === 'TOKEN_REFRESHED') {
+         // Just update the user object if needed, don't trigger full loading
+         if (session?.user) {
+             // Optional: update user state silently
+         }
       }
     });
+    
+    // Safety Timeout
+    const safetyTimeout = setTimeout(() => {
+        if (mounted && loading) {
+            console.warn("Auth initialization timed out, forcing UI render.");
+            setLoading(false);
+        }
+    }, 4000);
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      clearTimeout(safetyTimeout);
     };
   }, []);
 
@@ -118,9 +133,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const triggerLogout = () => {
       logout();
-      // Only alert if page is visible
       if (document.visibilityState === 'visible') {
-         // Using console warn instead of alert to be less intrusive on wake
          console.warn("Session timed out due to inactivity.");
       }
     };
