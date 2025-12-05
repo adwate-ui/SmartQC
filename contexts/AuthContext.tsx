@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { User } from '../types';
 import { supabase } from '../lib/supabaseClient';
 
@@ -67,6 +67,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // --- Auto-Logout on Inactivity Logic ---
+  useEffect(() => {
+    if (!user) return;
+
+    // 30 minutes in milliseconds
+    const INACTIVITY_LIMIT = 30 * 60 * 1000; 
+    let timeoutId: any;
+
+    const triggerLogout = () => {
+      logout();
+      alert("Session timed out due to inactivity.");
+    };
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(triggerLogout, INACTIVITY_LIMIT);
+    };
+
+    // Events that count as activity
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove', 'click'];
+
+    // Attach listeners
+    events.forEach(event => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    // Start the timer
+    resetTimer();
+
+    // Cleanup
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      events.forEach(event => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [user]); // Re-run effect when user login state changes
 
   const fetchUserApiKey = async (userId: string) => {
     try {
