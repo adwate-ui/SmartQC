@@ -1,8 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductDetails, QCReport, QCStatus, AiMode } from "../types";
-import { extractOgImage, generateUUID } from "../utils";
+import { extractOgImage, generateUUID, fileToBase64 } from "../utils";
 
-// Exporting fileToBase64 from here for backward compatibility with imports in other files
+// Exporting fileToBase64 from here for backward compatibility
 export { fileToBase64 } from "../utils";
 
 const PROMPTS = {
@@ -39,11 +39,7 @@ export const identifyProductFromMedia = async (
   aiMode: AiMode
 ): Promise<ProductDetails> => {
   const ai = new GoogleGenAI({ apiKey });
-  
-  // Use gemini-3-pro-preview for detailed reasoning or when thinking is needed
-  // Use gemini-2.5-flash for speed
   const modelName = aiMode === 'detailed' ? 'gemini-3-pro-preview' : 'gemini-2.5-flash';
-
   const tools = [{ googleSearch: {} }];
 
   const schema = {
@@ -62,17 +58,13 @@ export const identifyProductFromMedia = async (
   };
 
   let contents;
-  
   if (isUrlMode) {
-    contents = { 
-        parts: [{ text: PROMPTS.IDENTIFY_URL(input) }]
-    };
+    contents = { parts: [{ text: PROMPTS.IDENTIFY_URL(input) }] };
   } else {
-    // Input is base64 string
+    // Base64 logic
     const match = input.match(/^data:(.*?);base64,(.*)$/);
     const mimeType = match ? match[1] : 'image/jpeg';
     const data = match ? match[2] : input;
-
     contents = {
       parts: [
         { inlineData: { mimeType, data } },
@@ -88,20 +80,14 @@ export const identifyProductFromMedia = async (
       tools,
       responseMimeType: "application/json",
       responseSchema: schema,
-      // Add thinking budget if detailed mode is selected
       ...(aiMode === 'detailed' ? { thinkingConfig: { thinkingBudget: 1024 } } : {}),
     }
   });
 
   const text = response.text || "{}";
   let json: any = {};
-  try {
-    json = JSON.parse(text);
-  } catch (e) {
-    console.warn("JSON parse error", e);
-  }
+  try { json = JSON.parse(text); } catch (e) {}
 
-  // Attempt to extract URL from grounding metadata if not present in JSON
   let foundUrl = json.productUrl || "";
   const grounding = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
   if (!foundUrl && grounding) {
@@ -113,12 +99,24 @@ export const identifyProductFromMedia = async (
      }
   }
 
-  // Extract OG Image if possible
+  // --- Pure Frontend Image Extraction (No Python) ---
   let imageUrl = "";
+  
+  // 1. Try Client-Side Proxy
   if (isUrlMode) {
     imageUrl = await extractOgImage(input) || "";
   } else if (foundUrl) {
     imageUrl = await extractOgImage(foundUrl) || "";
+  }
+
+  // 2. Fallback to Search Tool Result
+  if (!imageUrl && grounding) {
+    for (const chunk of grounding) {
+       if (chunk.web?.uri?.match(/\.(jpeg|jpg|png|webp)$/i)) {
+         imageUrl = chunk.web.uri;
+         break;
+       }
+    }
   }
 
   return {
@@ -148,14 +146,12 @@ export const performQualityControl = async (
 
   const parts: any[] = [];
 
-  // 1. Reference Image Part
   const refMatch = referenceImage.match(/^data:(.*?);base64,(.*)$/);
   if (refMatch) {
     parts.push({ inlineData: { mimeType: refMatch[1], data: refMatch[2] } });
-    parts.push({ text: "REFERENCE (Golden Sample) Image" });
+    parts.push({ text: "REFERENCE IMAGE" });
   }
 
-  // 2. Inspection Images Parts
   inspectionImages.forEach((img, idx) => {
     const match = img.match(/^data:(.*?);base64,(.*)$/);
     if (match) {
@@ -164,15 +160,10 @@ export const performQualityControl = async (
     }
   });
 
-  // 3. Prompt Part
   const prompt = `
-    Product Context:
-    Name: ${productDetails.name} (${productDetails.sku})
-    Material: ${productDetails.material}
-    Description: ${productDetails.description}
+    Context: ${productDetails.name} (${productDetails.sku}).
     Previous Status: ${previousReports.length > 0 ? previousReports[0].status : "None"}
-
-    Perform a full QC inspection based on the provided images.
+    Perform QC inspection.
   `;
   parts.push({ text: prompt });
 
@@ -230,20 +221,17 @@ export const performQualityControl = async (
 
   const text = response.text || "{}";
   let json: any = {};
-  try {
-    json = JSON.parse(text);
-  } catch (e) {
-    console.error("QC Parse Error", e);
-    // Fallback error report
+  try { json = JSON.parse(text); } catch (e) {
+    console.error(e);
     return {
        id: generateUUID(),
        timestamp: Date.now(),
        status: QCStatus.FAIL,
        overallScore: 0,
-       summary: "AI Failed to generate valid report.",
+       summary: "Analysis Failed",
        faults: [],
        sections: [],
-       followUp: { required: false, missingInfo: "AI Error", suggestedAngles: [] },
+       followUp: { required: false, missingInfo: "Error", suggestedAngles: [] },
        images: inspectionImages,
        isExpertMode
     };

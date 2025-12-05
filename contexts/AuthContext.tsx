@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { supabase } from '../lib/supabaseClient';
 
@@ -23,8 +23,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Track the currently loaded user ID to prevent redundant re-fetches
-  const loadedUserId = useRef<string | null>(null);
+  // Helper: Fetch API Key
+  const fetchApiKey = async (userId: string): Promise<string | null> => {
+    try {
+      const { data } = await supabase
+        .from('user_settings')
+        .select('gemini_api_key')
+        .eq('user_id', userId)
+        .maybeSingle();
+      return data?.gemini_api_key || null;
+    } catch {
+      return null;
+    }
+  };
 
   const mapUser = (sessionUser: any): User => ({
     id: sessionUser.id,
@@ -33,117 +44,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     avatar_url: sessionUser.user_metadata?.avatar_url
   });
 
-  const loadSessionData = async (sessionUser: any) => {
-    // If we've already loaded this user, skip to avoid flicker
-    if (loadedUserId.current === sessionUser.id && apiKey !== null) return;
-    
-    loadedUserId.current = sessionUser.id;
-
-    try {
-      // 1. Fetch API Key
-      const { data, error } = await supabase
-        .from('user_settings')
-        .select('gemini_api_key')
-        .eq('user_id', sessionUser.id)
-        .maybeSingle();
-
-      if (error && error.code !== 'PGRST116') {
-        console.warn("Error fetching API Key:", error);
-      }
-
-      // 2. Set State Batch
-      setUser(mapUser(sessionUser));
-      setApiKey(data?.gemini_api_key || null);
-    } catch (e) {
-      console.error("Auth load error:", e);
-    }
-  };
-
   useEffect(() => {
     let mounted = true;
 
-    const init = async () => {
+    const runInitialization = async () => {
       try {
-        // 1. Check for existing session
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
+        // 1. Get Session
+        const { data: { session } } = await supabase.auth.getSession();
 
         if (session?.user && mounted) {
-          // 2. Load data strictly before stopping loading
-          await loadSessionData(session.user);
+          // 2. Prepare User
+          const currentUser = mapUser(session.user);
+          setUser(currentUser);
+
+          // 3. Get Key (Must await here to prevent modal flash)
+          const key = await fetchApiKey(session.user.id);
+          if (mounted) setApiKey(key);
         }
       } catch (e) {
-        console.error("Auth init exception:", e);
+        console.error("Initialization Error", e);
       } finally {
-        // 3. Always unblock UI
+        // 4. Stop Loading
+        // Only set this if we are still mounted. 
+        // In Strict Mode, the first effect will unmount (mounted=false) preventing state update.
+        // The second effect will run through and hit this line.
         if (mounted) setLoading(false);
       }
     };
 
-    init();
+    runInitialization();
 
-    // 4. Listen for auth changes
+    // 5. Listen for events (Updates state silently, doesn't block UI)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
-      if (event === 'INITIAL_SESSION') return; // Handled by init()
-
-      if (event === 'SIGNED_IN') {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         if (session?.user) {
-          // If we switched users, or came from a clean state
-          if (session.user.id !== loadedUserId.current) {
-             setLoading(true);
-             await loadSessionData(session.user);
-             setLoading(false);
+          const currentUser = mapUser(session.user);
+          setUser(currentUser);
+          
+          // Silent key refresh check
+          if (!apiKey) {
+             const key = await fetchApiKey(session.user.id);
+             if (mounted) setApiKey(key);
           }
         }
       } else if (event === 'SIGNED_OUT') {
-        loadedUserId.current = null;
         setUser(null);
         setApiKey(null);
-        setLoading(false);
       }
     });
-    
-    // Safety Fallback: Ensure we never get stuck on loading
-    const timeout = setTimeout(() => {
-        if (mounted && loading) setLoading(false);
-    }, 5000);
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
-      clearTimeout(timeout);
     };
   }, []);
-
-  // Inactivity Timer
-  useEffect(() => {
-    if (!user) return;
-    const INACTIVITY_LIMIT = 30 * 60 * 1000; 
-    let timeoutId: any;
-
-    const doLogout = () => {
-       supabase.auth.signOut().then(() => {
-         setUser(null);
-         setApiKey(null);
-       });
-    };
-
-    const resetTimer = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(doLogout, INACTIVITY_LIMIT);
-    };
-
-    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
-    events.forEach(e => window.addEventListener(e, resetTimer));
-    resetTimer();
-
-    return () => {
-      clearTimeout(timeoutId);
-      events.forEach(e => window.removeEventListener(e, resetTimer));
-    };
-  }, [user]);
 
   const login = async (email: string, password: string) => {
     setError(null);
@@ -168,15 +124,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
-    loadedUserId.current = null;
+    try { await supabase.auth.signOut(); } catch (e) {}
     setUser(null);
     setApiKey(null);
   };
 
   const saveApiKey = async (key: string) => {
     const { data: { user: currentUser } } = await supabase.auth.getUser();
-    if (!currentUser) throw new Error("No authenticated user.");
+    if (!currentUser) throw new Error("No user.");
 
     const { error } = await supabase
       .from('user_settings')
