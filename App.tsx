@@ -11,7 +11,7 @@ import { useAuth } from './contexts/AuthContext';
 import { LogOut, User as UserIcon } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { user, apiKey, logout, setApiKey, isAuthenticated } = useAuth();
+  const { user, apiKey, logout, isAuthenticated } = useAuth();
   
   // Only initialize product manager if user exists
   const {
@@ -78,14 +78,14 @@ const AppContent: React.FC = () => {
 
   return (
     <>
-      {showApiKeyModal && <ApiKeyModal onSave={setApiKey} />}
+      {showApiKeyModal && <ApiKeyModal />}
       
       <Layout currentView={view} setView={setView}>
         <div className="flex justify-end mb-4">
            <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm">
               <div className="flex items-center gap-2">
-                 {user?.avatar ? (
-                   <img src={user.avatar} className="w-6 h-6 rounded-full" alt="avatar" />
+                 {user?.avatar_url ? (
+                   <img src={user.avatar_url} className="w-6 h-6 rounded-full" alt="avatar" />
                  ) : (
                    <UserIcon size={16} className="text-slate-500" />
                  )}
