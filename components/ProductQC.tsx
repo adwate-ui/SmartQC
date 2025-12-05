@@ -1,14 +1,14 @@
-
 import React, { useState } from 'react';
 import { Product } from '../types';
 import { fileToBase64 } from '../utils';
-import { Upload, X, Loader2, Camera, ExternalLink, ChevronLeft } from 'lucide-react';
+import { Upload, X, Loader2, Camera, ExternalLink, ChevronLeft, Star, Info } from 'lucide-react';
 import { isVideo, safeLink } from '../utils';
 import QCReportCard from './QCReportCard';
+import Tooltip from './Tooltip';
 
 interface ProductQCProps {
   product: Product;
-  onStartQC: (files: File[]) => void;
+  onStartQC: (files: File[], isExpertMode: boolean) => void;
   onBack: () => void;
 }
 
@@ -17,6 +17,7 @@ const ProductQC: React.FC<ProductQCProps> = ({ product, onStartQC, onBack }) => 
   const [previews, setPreviews] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [viewMedia, setViewMedia] = useState<string | null>(null);
+  const [isExpertMode, setIsExpertMode] = useState(false);
 
   const isProcessing = product.processingStatus === 'analyzing';
   const progress = product.progress || 0;
@@ -56,7 +57,7 @@ const ProductQC: React.FC<ProductQCProps> = ({ product, onStartQC, onBack }) => 
 
   const handleRunQC = () => {
     if (files.length > 0) {
-      onStartQC(files);
+      onStartQC(files, isExpertMode);
       setFiles([]);
       setPreviews([]);
     }
@@ -130,7 +131,27 @@ const ProductQC: React.FC<ProductQCProps> = ({ product, onStartQC, onBack }) => 
               </div>
             )}
 
-            <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2"><Camera size={20} className="text-blue-600" /> Perform Inspection</h3>
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                   <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                       <Camera size={20} className="text-blue-600" /> Perform Inspection
+                   </h3>
+                   <Tooltip content="Upload photos/videos of the current item condition to compare against the reference.">
+                     <Info size={14} className="text-slate-400 cursor-help" />
+                   </Tooltip>
+                </div>
+                
+                {/* Expert Mode Toggle */}
+                <Tooltip content="Switch to a strict, world-class expert persona. Results will be more critical and detailed." position="left">
+                    <button
+                        onClick={() => setIsExpertMode(!isExpertMode)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold transition-all ${isExpertMode ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    >
+                        <Star size={12} className={isExpertMode ? "fill-current" : ""} />
+                        {isExpertMode ? "Expert Mode" : "Normal Mode"}
+                    </button>
+                </Tooltip>
+            </div>
             
             <div className="space-y-4">
               <label className="block w-full cursor-pointer">
@@ -155,9 +176,9 @@ const ProductQC: React.FC<ProductQCProps> = ({ product, onStartQC, onBack }) => 
               <button
                 onClick={handleRunQC}
                 disabled={isProcessing || previews.length === 0}
-                className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                className={`w-full py-3 text-white rounded-lg font-bold disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors ${isExpertMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
               >
-                Start Inspection
+                {isExpertMode ? "Start Expert Inspection" : "Start Inspection"}
               </button>
             </div>
           </div>

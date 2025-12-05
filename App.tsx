@@ -67,7 +67,7 @@ const AppContent: React.FC = () => {
         return (
           <ProductQC 
             product={selectedProduct}
-            onStartQC={(files) => handleStartQC(selectedProduct, files)}
+            onStartQC={(files, isExpertMode) => handleStartQC(selectedProduct, files, isExpertMode)}
             onBack={() => setView('dashboard')}
           />
         );
@@ -81,7 +81,6 @@ const AppContent: React.FC = () => {
       {showApiKeyModal && <ApiKeyModal onSave={setApiKey} />}
       
       <Layout currentView={view} setView={setView}>
-        {/* User Info Header Snippet - Injecting into the layout via children for simplicity in this structure */}
         <div className="flex justify-end mb-4">
            <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm">
               <div className="flex items-center gap-2">

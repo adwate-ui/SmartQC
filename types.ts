@@ -8,6 +8,7 @@ export interface ProductDetails {
   description: string;
   category: string;
   productUrl: string;
+  imageUrl?: string;
 }
 
 export enum QCStatus {
@@ -46,6 +47,7 @@ export interface QCReport {
   sections: QCSection[]; // Detailed breakdown
   followUp: QCFollowUp;
   images: string[]; // Base64 of images used in this inspection
+  isExpertMode?: boolean;
 }
 
 export type ProcessingStatus = 'idle' | 'identifying' | 'analyzing' | 'error';

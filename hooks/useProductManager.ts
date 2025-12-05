@@ -155,7 +155,7 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
     }
   };
 
-  const handleStartQC = async (product: Product, files: File[]) => {
+  const handleStartQC = async (product: Product, files: File[], isExpertMode: boolean = false) => {
     if (!apiKey) {
       alert("API Key is missing.");
       return;
@@ -177,7 +177,8 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
         product.mainImage,
         product.qcReports,
         newMediaBase64,
-        aiMode
+        aiMode,
+        isExpertMode
       );
 
       setProducts(prev => prev.map(p => {

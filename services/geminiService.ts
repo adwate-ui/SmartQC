@@ -13,7 +13,8 @@ const PROMPTS = {
       Task:
       1. Analyze the URL string to Infer the Brand, Product Name, and SKU.
       2. Use the Google Search tool to find details: Name, Material, Estimated Cost, Retailer, Description, Category.
-      3. CRITICAL: Search for "images of [Product Name]" to find a high-quality image URL.
+      3. CRITICAL: Search for "images of [Product Name] official" to find a high-quality image URL.
+      4. IF you cannot find a direct image link from the URL, perform a Google Image search and pick the best matching official white-background product image.
       
       Formatting Rules:
       - Estimated Cost MUST be in format "$X,XXX" (e.g., "$1,200"). Do not use decimals.
@@ -37,6 +38,7 @@ const PROMPTS = {
       3. Extract: Name, Material, Estimated Cost (USD), Retailer, Description, Category.
       4. CRITICAL: Use the Google Search tool to find the official product page URL. 
          - Copy this exact found URL into the 'productUrl' field in the JSON.
+      5. CRITICAL: Use the Google Search tool to find a high-resolution public URL for the product image (e.g. from the official site) and put it in 'productUrl' if possible, or a new 'imageUrl' field.
 
       Formatting Rules:
       - Estimated Cost MUST be in format "$X,XXX" (e.g., "$1,200"). Do not use decimals.
@@ -53,8 +55,8 @@ const PROMPTS = {
         "productUrl": "string"
       }
     `,
-  QC: (productContext: ProductDetails, referenceContextText: string, inputMapping: string, historyContextText: string) => `
-    You are a Strict QC Inspector.
+  QC: (productContext: ProductDetails, referenceContextText: string, inputMapping: string, historyContextText: string, isExpertMode: boolean) => `
+    You are ${isExpertMode ? `THE WORLD'S LEADING EXPERT AUTHENTICATOR for ${productContext.retailer || 'Luxury Goods'}. You have 30+ years of experience detecting high-tier super-fakes. You are extremely strict, cynical, and detail-obsessed.` : 'a Strict QC Inspector.'}
     
     PRODUCT CONTEXT:
     Product: ${productContext.name} (${productContext.sku})
@@ -82,6 +84,7 @@ const PROMPTS = {
     IMPORTANT: 
     - 'details' inside 'sections' MUST be an Array of Strings (Bullet points).
     - Assign a 'status' (PASS, FAIL, WARNING) to each section based on findings.
+    - If followUp is required, provide specific 'suggestedAngles'.
     
     Structure:
     {
@@ -278,7 +281,8 @@ export const performQualityControl = async (
   mainProductImage: string,
   previousReports: QCReport[],
   newMediaFiles: string[],
-  mode: AiMode = 'detailed'
+  mode: AiMode = 'detailed',
+  isExpertMode: boolean = false
 ): Promise<QCReport> => {
   
   const modelName = mode === 'detailed' ? 'gemini-3-pro-preview' : 'gemini-2.5-flash';
@@ -356,7 +360,7 @@ export const performQualityControl = async (
   const fullParts = [
       ...(mainImagePart ? [mainImagePart] : []), 
       ...inspectionParts,
-      { text: PROMPTS.QC(productContext, referenceContextText, inputMapping, historyContextText) }
+      { text: PROMPTS.QC(productContext, referenceContextText, inputMapping, historyContextText, isExpertMode) }
   ];
 
   const response = await generateWithFallback(
@@ -410,7 +414,8 @@ export const performQualityControl = async (
     id: Date.now().toString(),
     timestamp: Date.now(),
     images: [...uniqueHistoryImages, ...newMediaFiles],
-    status: result.status as QCStatus
+    status: result.status as QCStatus,
+    isExpertMode
   };
 
   return report;

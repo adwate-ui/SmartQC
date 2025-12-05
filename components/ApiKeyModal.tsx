@@ -1,6 +1,6 @@
-
 import React, { useState } from 'react';
-import { Key, ShieldCheck } from 'lucide-react';
+import { Key, ShieldCheck, Info } from 'lucide-react';
+import Tooltip from './Tooltip';
 
 interface ApiKeyModalProps {
   onSave: (key: string) => void;
@@ -31,7 +31,12 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ onSave }) => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">API Key</label>
+            <div className="flex items-center justify-between mb-1">
+               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">API Key</label>
+               <Tooltip content="Your key is stored ONLY in your browser's Local Storage. We do not transmit it to any backend server." position="left">
+                 <Info size={12} className="text-slate-400 cursor-help" />
+               </Tooltip>
+            </div>
             <input 
               type="password" 
               value={inputKey}
@@ -40,9 +45,6 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ onSave }) => {
               placeholder="AIzaSy..."
               autoFocus
             />
-            <p className="text-xs text-slate-400 mt-2">
-              Your key is stored locally on your device and never sent to our servers.
-            </p>
           </div>
 
           <button 

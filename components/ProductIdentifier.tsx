@@ -1,6 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { Camera, Upload, Video, Link as LinkIcon, Image as ImageIcon } from 'lucide-react';
+import Tooltip from './Tooltip';
 
 interface ProductIdentifierProps {
   onStartIdentification: (file: File | null, url: string | null) => void;
@@ -34,8 +34,6 @@ const ProductIdentifier: React.FC<ProductIdentifierProps> = ({ onStartIdentifica
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       // CRITICAL FIX: Ignore paste events originating from input fields
-      // This prevents the global listener from overriding or conflicting with 
-      // the native paste behavior in the URL input box.
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
         return;
@@ -58,7 +56,6 @@ const ProductIdentifier: React.FC<ProductIdentifierProps> = ({ onStartIdentifica
       }
       
       // Handle Text/URL Paste if in URL mode or no file present
-      // Only runs if NOT typing in an input (handled by check above)
       const text = e.clipboardData?.getData('text');
       if (text && (text.startsWith('http') || mode === 'url')) {
         setMode('url');
@@ -80,22 +77,30 @@ const ProductIdentifier: React.FC<ProductIdentifierProps> = ({ onStartIdentifica
 
       {/* Tabs */}
       <div className="flex bg-slate-100 p-1 rounded-lg">
-        <button
-          onClick={() => setMode('upload')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${
-            mode === 'upload' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <ImageIcon size={16} /> Upload Image
-        </button>
-        <button
-          onClick={() => setMode('url')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${
-            mode === 'url' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <LinkIcon size={16} /> Product URL
-        </button>
+        <div className="flex-1">
+          <Tooltip content="Upload an image or video file directly from your device.">
+            <button
+              onClick={() => setMode('upload')}
+              className={`w-full flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${
+                mode === 'upload' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <ImageIcon size={16} /> Upload Image
+            </button>
+          </Tooltip>
+        </div>
+        <div className="flex-1">
+          <Tooltip content="Enter a direct link to the product page (e.g., Brand site, Amazon).">
+            <button
+              onClick={() => setMode('url')}
+              className={`w-full flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${
+                mode === 'url' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <LinkIcon size={16} /> Product URL
+            </button>
+          </Tooltip>
+        </div>
       </div>
 
       <div className="relative min-h-[250px]">

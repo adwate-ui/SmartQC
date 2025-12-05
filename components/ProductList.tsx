@@ -1,9 +1,9 @@
-
 import React, { useMemo, useState } from 'react';
 import { Product, AiMode } from '../types';
-import { Plus, Package, Zap, BrainCircuit, Trash2, Tag, ArrowRight } from 'lucide-react';
+import { Plus, Package, Zap, BrainCircuit, Trash2, Tag, ArrowRight, Info } from 'lucide-react';
 import ProductCard from './ProductCard';
 import ConfirmationModal from './ConfirmationModal';
+import Tooltip from './Tooltip';
 
 interface ProductListProps {
   products: Product[];
@@ -58,43 +58,56 @@ const ProductList: React.FC<ProductListProps> = ({
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-            <h2 className="text-2xl font-bold text-slate-800">Inventory</h2>
+            <div className="flex items-center gap-2">
+               <h2 className="text-2xl font-bold text-slate-800">Inventory</h2>
+               <Tooltip content="Your complete collection of identified products. Grouped by category.">
+                  <Info size={16} className="text-slate-400 cursor-help" />
+               </Tooltip>
+            </div>
             
             <div className="bg-slate-200 p-1 rounded-lg flex items-center">
-                <button 
-                  onClick={() => onToggleAiMode('fast')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aiMode === 'fast' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <Zap size={12} className={aiMode === 'fast' ? "fill-current" : ""} /> Fast
-                </button>
-                <button 
-                  onClick={() => onToggleAiMode('detailed')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aiMode === 'detailed' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <BrainCircuit size={12} /> Detailed
-                </button>
+                <Tooltip content="Gemini 2.5 Flash: Fast responses, good for quick checks.">
+                  <button 
+                    onClick={() => onToggleAiMode('fast')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aiMode === 'fast' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                      <Zap size={12} className={aiMode === 'fast' ? "fill-current" : ""} /> Fast
+                  </button>
+                </Tooltip>
+                <Tooltip content="Gemini 3.0 Pro (Thinking): Deep reasoning mode. Slower (45s+) but highly accurate.">
+                  <button 
+                    onClick={() => onToggleAiMode('detailed')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${aiMode === 'detailed' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                      <BrainCircuit size={12} /> Detailed
+                  </button>
+                </Tooltip>
             </div>
         </div>
 
         <div className="flex gap-3 w-full sm:w-auto">
           {selectedIds.size > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded-lg font-medium transition-colors cursor-pointer z-10 border border-red-200 active:scale-95"
-            >
-              <Trash2 size={18} className="pointer-events-none" />
-              <span>Delete ({selectedIds.size})</span>
-            </button>
+            <Tooltip content="Permanently remove selected items and their reports." position="left">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded-lg font-medium transition-colors cursor-pointer z-10 border border-red-200 active:scale-95"
+              >
+                <Trash2 size={18} className="pointer-events-none" />
+                <span>Delete ({selectedIds.size})</span>
+              </button>
+            </Tooltip>
           )}
 
-          <button
-            onClick={onAddNew}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md hover:shadow-lg active:scale-95"
-          >
-            <Plus size={18} className="pointer-events-none" />
-            <span>New Product</span>
-          </button>
+          <Tooltip content="Identify a new product via Image Upload or URL." position="left">
+            <button
+              onClick={onAddNew}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-md hover:shadow-lg active:scale-95"
+            >
+              <Plus size={18} className="pointer-events-none" />
+              <span>New Product</span>
+            </button>
+          </Tooltip>
         </div>
       </div>
 
