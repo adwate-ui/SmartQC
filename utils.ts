@@ -16,6 +16,20 @@ export const safeLink = (url?: string): string | undefined => {
 };
 
 /**
+ * Generates a UUID v4.
+ * Uses crypto.randomUUID if available, falls back to a math-based generator for compatibility.
+ */
+export const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+/**
  * Compresses an image file to a smaller JPEG Base64 string.
  * Resizes to max 800px dimension and 0.6 quality to ensure high speed and small payload.
  */

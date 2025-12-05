@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 
 // Use Vite environment variables if available, otherwise fall back to the provided keys.

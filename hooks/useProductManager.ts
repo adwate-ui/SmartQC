@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Product, ViewState, AiMode } from '../types';
 import { identifyProductFromMedia, performQualityControl, fileToBase64 } from '../services/geminiService';
 import { supabase } from '../lib/supabaseClient';
+import { generateUUID } from '../utils';
 
 export const useProductManager = (userId: string | undefined, apiKey: string | null) => {
   const [view, setView] = useState<ViewState>('dashboard');
@@ -246,7 +247,7 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
       return;
     }
 
-    const tempId = crypto.randomUUID();
+    const tempId = generateUUID();
     let base64Image = '';
     const rawUrl = url || '';
 

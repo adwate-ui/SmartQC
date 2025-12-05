@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { supabase } from '../lib/supabaseClient';
 
@@ -24,11 +24,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initial Session Check & Subscription
   useEffect(() => {
-    const initSession = async () => {
+    let mounted = true;
+
+    const fetchUserApiKey = async (userId: string) => {
       try {
+        const { data, error } = await supabase
+          .from('user_settings')
+          .select('gemini_api_key')
+          .eq('user_id', userId)
+          .single();
+        
+        if (mounted) {
+          if (data) {
+            setApiKey(data.gemini_api_key);
+          } else {
+            setApiKey(null);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch API key:', err);
+      }
+    };
+
+    const initializeAuth = async () => {
+      try {
+        // 1. Get initial session (Supabase v2 syntax)
         const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user && mounted) {
+          const userData: User = {
+            id: session.user.id,
+            email: session.user.email!,
+            name: session.user.user_metadata?.name || session.user.email?.split('@')[0],
+            avatar_url: session.user.user_metadata?.avatar_url
+          };
+          setUser(userData);
+          await fetchUserApiKey(session.user.id);
+        }
+      } catch (e) {
+        console.error("Auth init error:", e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    initializeAuth();
+
+    // 2. Set up listener (Supabase v2 syntax)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
         if (session?.user) {
           const userData: User = {
             id: session.user.id,
@@ -39,33 +86,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(userData);
           await fetchUserApiKey(session.user.id);
         }
-      } catch (err: any) {
-        console.error('Error fetching session:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const userData: User = {
-          id: session.user.id,
-          email: session.user.email!,
-          name: session.user.user_metadata?.name || session.user.email?.split('@')[0],
-          avatar_url: session.user.user_metadata?.avatar_url
-        };
-        setUser(userData);
-        await fetchUserApiKey(session.user.id);
-      } else {
+      } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setApiKey(null);
       }
+      
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    // 3. Safety Timeout: Force loading to false after 5s if anything hangs
+    const safetyTimeout = setTimeout(() => {
+        if (mounted) setLoading(false);
+    }, 5000);
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+      clearTimeout(safetyTimeout);
+    };
   }, []);
 
   // --- Auto-Logout on Inactivity Logic ---
@@ -78,7 +116,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const triggerLogout = () => {
       logout();
-      alert("Session timed out due to inactivity.");
+      if (document.visibilityState === 'visible') {
+         alert("Session timed out due to inactivity.");
+      }
     };
 
     const resetTimer = () => {
@@ -104,47 +144,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         window.removeEventListener(event, resetTimer);
       });
     };
-  }, [user]); // Re-run effect when user login state changes
-
-  const fetchUserApiKey = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('user_settings')
-        .select('gemini_api_key')
-        .eq('user_id', userId)
-        .single();
-      
-      if (data) {
-        setApiKey(data.gemini_api_key);
-      } else if (!error || error.code === 'PGRST116') {
-        // No row exists, or error meant not found
-        setApiKey(null);
-      }
-    } catch (err) {
-      console.error('Failed to fetch API key:', err);
-    }
-  };
+  }, [user]);
 
   const login = async (email: string, password: string) => {
     setError(null);
+    // Supabase v2 syntax
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   };
 
   const signUp = async (email: string, password: string, name: string) => {
     setError(null);
+    // Supabase v2 syntax
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: { name }
-      }
+      options: { data: { name } }
     });
     if (error) throw error;
   };
 
   const loginWithGoogle = async () => {
     setError(null);
+    // Supabase v2 syntax
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
     });
@@ -163,7 +185,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const saveApiKey = async (key: string) => {
-    // 1. Get the current user directly from Supabase to ensure no state staleness
+    // Supabase v2 syntax: getUser is async
     const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
 
     if (userError || !currentUser) {
@@ -171,22 +193,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error("User not authenticated");
     }
     
-    // 2. Upsert the API Key into user_settings table
     const { error } = await supabase
       .from('user_settings')
       .upsert({ 
         user_id: currentUser.id, 
         gemini_api_key: key,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id' })
-      .select();
+      }, { onConflict: 'user_id' });
 
     if (error) {
       console.error("Failed to save API Key to DB:", error);
       throw error;
     }
     
-    // 3. Update local state only after successful DB write
     setApiKey(key);
   };
 
