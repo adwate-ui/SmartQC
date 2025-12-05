@@ -152,9 +152,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setApiKey(null);
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn("Logout network error:", e);
+    } finally {
+      setUser(null);
+      setApiKey(null);
+    }
   };
 
   const saveApiKey = async (key: string) => {

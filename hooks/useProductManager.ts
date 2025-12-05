@@ -11,7 +11,7 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
   const [aiMode, setAiMode] = useState<AiMode>('detailed');
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
 
-  // Fetch Products from Supabase on load
+  // Fetch Products & Rehydrate Images from Supabase
   useEffect(() => {
     if (!userId) {
       setProducts([]);
@@ -19,21 +19,74 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
     }
 
     const fetchProducts = async () => {
-      const { data, error } = await supabase
+      // 1. Fetch the lightweight product metadata (JSON)
+      const { data: productRows, error: productError } = await supabase
         .from('products')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error("Error fetching products:", error);
-      } else if (data) {
-        // Map DB rows back to Product objects (unwrapping the 'content' jsonb column)
-        const loadedProducts = data.map((row: any) => ({
-          ...row.content,
-          id: row.id // Ensure we use the real DB ID
-        }));
-        setProducts(loadedProducts);
+      if (productError) {
+        console.error("Error fetching products:", productError);
+        return;
       }
+
+      if (!productRows || productRows.length === 0) {
+        setProducts([]);
+        return;
+      }
+
+      // 2. Fetch all images associated with these products
+      const productIds = productRows.map((r: any) => r.id);
+      const { data: imageRows, error: imageError } = await supabase
+        .from('product_images')
+        .select('product_id, report_id, image_index, image_data')
+        .in('product_id', productIds);
+
+      if (imageError) {
+        console.error("Error fetching images:", imageError);
+      }
+
+      // 3. Create a lookup map for images: [productId][reportId] -> Map<index, data>
+      // Structure: images[productId][reportId][index] = base64String
+      const imageMap: Record<string, Record<string, string[]>> = {};
+
+      if (imageRows) {
+        imageRows.forEach((img: any) => {
+          if (!imageMap[img.product_id]) imageMap[img.product_id] = {};
+          if (!imageMap[img.product_id][img.report_id]) imageMap[img.product_id][img.report_id] = [];
+          
+          imageMap[img.product_id][img.report_id][img.image_index] = img.image_data;
+        });
+      }
+
+      // 4. Reassemble the full Product objects
+      const loadedProducts = productRows.map((row: any) => {
+        const product = row.content as Product;
+        product.id = row.id; // Ensure ID matches DB
+
+        // Rehydrate Main Image
+        // 'main' is the reserved report_id for the product cover image
+        const mainImages = imageMap[product.id]?.['main'];
+        if (mainImages && mainImages[0]) {
+          product.mainImage = mainImages[0];
+        }
+
+        // Rehydrate QC Report Images
+        if (product.qcReports) {
+          product.qcReports = product.qcReports.map(report => {
+            const reportImages = imageMap[product.id]?.[report.id];
+            if (reportImages) {
+              // Filter out empty slots if any gaps exist, ensuring a clean array
+              return { ...report, images: reportImages.filter(Boolean) };
+            }
+            return report;
+          });
+        }
+
+        return product;
+      });
+
+      setProducts(loadedProducts);
     };
 
     fetchProducts();
@@ -41,19 +94,82 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
 
   const saveProductToDb = async (product: Product) => {
     if (!userId) return;
-    
-    // We store the Product JSON in the 'content' column
-    // and use the ID as the primary key.
-    const { error } = await supabase
-      .from('products')
-      .upsert({
-        id: product.id,
-        user_id: userId,
-        content: product,
-        created_at: new Date(product.createdAt).toISOString()
+
+    try {
+      // 1. Prepare the Image Rows for the separate table
+      const imageRows: any[] = [];
+      const timestamp = new Date().toISOString();
+
+      // Main Image
+      // Only save if it's actual data (Base64) and not a placeholder or empty
+      if (product.mainImage && product.mainImage.length > 100) {
+        imageRows.push({
+          user_id: userId,
+          product_id: product.id,
+          report_id: 'main',
+          image_index: 0,
+          image_data: product.mainImage,
+          updated_at: timestamp
+        });
+      }
+
+      // QC Images
+      product.qcReports.forEach(report => {
+        if (report.images && report.images.length > 0) {
+          report.images.forEach((img, idx) => {
+            if (img && img.length > 100) {
+               imageRows.push({
+                user_id: userId,
+                product_id: product.id,
+                report_id: report.id,
+                image_index: idx,
+                image_data: img,
+                updated_at: timestamp
+               });
+            }
+          });
+        }
       });
 
-    if (error) console.error("Error saving product:", error);
+      // 2. Prepare the Lightweight Product JSON (strip heavy images)
+      const cleanProduct = { ...product };
+      // Replace images with placeholders in the JSON blob to keep it small
+      cleanProduct.mainImage = "stored_in_product_images"; 
+      cleanProduct.qcReports = product.qcReports.map(r => ({
+        ...r,
+        images: [] // Images are stored in relation table
+      }));
+
+      // 3. Save the Product Metadata
+      const { error: productError } = await supabase
+        .from('products')
+        .upsert({
+          id: product.id,
+          user_id: userId,
+          content: cleanProduct,
+          created_at: new Date(product.createdAt).toISOString()
+        });
+
+      if (productError) throw productError;
+
+      // 4. Upsert the Images
+      // We use upsert to overwrite existing images at the same index
+      // The unique constraint (product_id, report_id, image_index) handles conflicts
+      if (imageRows.length > 0) {
+        const { error: imagesError } = await supabase
+          .from('product_images')
+          .upsert(imageRows, { onConflict: 'product_id, report_id, image_index' });
+        
+        if (imagesError) throw imagesError;
+      }
+
+    } catch (error: any) {
+      console.error("Error saving product:", error);
+      // Don't alert on unique violations if they happen harmlessly
+      if (error.code !== '23505') {
+        alert("Failed to save to cloud: " + error.message);
+      }
+    }
   };
 
   const deleteProductsFromDb = async (ids: string[]) => {
@@ -64,6 +180,7 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
       .in('id', ids);
 
     if (error) console.error("Error deleting products:", error);
+    // Images are deleted automatically via CASCADE constraint in SQL
   };
 
   const selectedProduct = products.find(p => p.id === selectedProductId) || null;
@@ -141,6 +258,7 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
         return;
       }
     } else if (url) {
+      // Temporary SVG placeholder while identification runs
       base64Image = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMTAwIDEwMCI+PHJlY3Qgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIGZpbGw9IiNmMmYyZjIiLz48dGV4dCB4PSI1MCIgeT0iNTAiIGZvbnQtZmFtaWx5PSJhcmlhbCIgZm9udC1zaXplPSIxNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzkwOTA5MCI+V1JCPC90ZXh0Pjwvc3ZnPg==';
     }
 
