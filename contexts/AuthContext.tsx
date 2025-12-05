@@ -23,23 +23,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Use a ref to track if we've already handled the initial load to prevent double-firing
-  const initRef = useRef(false);
+  // Refs to track state inside effects without dependency cycles
+  const userIdRef = useRef<string | null>(null);
+  const isInitialized = useRef(false);
 
-  // Helper: Get API Key
+  // Helper: Fetch API Key from DB
   const fetchApiKey = async (userId: string): Promise<string | null> => {
     try {
       const { data, error } = await supabase
         .from('user_settings')
         .select('gemini_api_key')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle(); 
       
       if (error) {
-        if (error.code !== 'PGRST116') {
-          console.error("DB Error fetching API Key:", error);
-        }
-        return null;
+         console.error("DB Error fetching API Key:", error);
+         return null;
       }
       return data?.gemini_api_key || null;
     } catch (e) {
@@ -48,17 +47,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const mapUser = (sessionUser: any): User => ({
+    id: sessionUser.id,
+    email: sessionUser.email!,
+    name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0],
+    avatar_url: sessionUser.user_metadata?.avatar_url
+  });
+
   const handleUserSession = async (sessionUser: any) => {
-      const userData: User = {
-        id: sessionUser.id,
-        email: sessionUser.email!,
-        name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0],
-        avatar_url: sessionUser.user_metadata?.avatar_url
-      };
-      setUser(userData);
+      // Update Ref first
+      userIdRef.current = sessionUser.id;
       
-      // Fetch key
+      // 1. Fetch Key FIRST (Await this strictly)
       const key = await fetchApiKey(sessionUser.id);
+      
+      // 2. Batch State Updates
+      setUser(mapUser(sessionUser));
       setApiKey(key);
   };
 
@@ -66,15 +70,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let mounted = true;
 
     const initAuth = async () => {
-      if (initRef.current) return;
-      initRef.current = true;
+      if (isInitialized.current) return;
+      isInitialized.current = true;
 
       try {
+        // 1. Get Session from Supabase (Local Storage)
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) throw error;
 
         if (session?.user && mounted) {
+          // If we have a session, load user + key synchronously
           await handleUserSession(session.user);
         }
       } catch (e) {
@@ -86,37 +92,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     initAuth();
 
+    // 2. Listen for Auth Changes (Sign In, Sign Out, OAuth Redirects)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
-      // Ignore INITIAL_SESSION as we handle it in initAuth explicitly
+      // INITIAL_SESSION is handled by initAuth.
       if (event === 'INITIAL_SESSION') return;
 
       if (event === 'SIGNED_IN') {
-        setLoading(true);
-        if (session?.user) {
-          await handleUserSession(session.user);
+        // Only reload if the user changed or we aren't loaded yet
+        if (session?.user && session.user.id !== userIdRef.current) {
+            setLoading(true);
+            await handleUserSession(session.user);
+            setLoading(false);
         }
-        setLoading(false);
       } else if (event === 'SIGNED_OUT') {
+        userIdRef.current = null;
         setUser(null);
         setApiKey(null);
         setLoading(false);
       } else if (event === 'TOKEN_REFRESHED') {
-         // Just update the user object if needed, don't trigger full loading
-         if (session?.user) {
-             // Optional: update user state silently
-         }
+         // No UI blocking needed
       }
     });
     
     // Safety Timeout
     const safetyTimeout = setTimeout(() => {
         if (mounted && loading) {
-            console.warn("Auth initialization timed out, forcing UI render.");
+            console.warn("Auth initialization timed out.");
             setLoading(false);
         }
-    }, 4000);
+    }, 5000);
 
     return () => {
       mounted = false;
@@ -125,7 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // --- Auto-Logout ---
+  // Inactivity Logout
   useEffect(() => {
     if (!user) return;
     const INACTIVITY_LIMIT = 30 * 60 * 1000; 
@@ -133,9 +139,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const triggerLogout = () => {
       logout();
-      if (document.visibilityState === 'visible') {
-         console.warn("Session timed out due to inactivity.");
-      }
     };
 
     const resetTimer = () => {
@@ -179,6 +182,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await supabase.auth.signOut();
     } catch (e) { console.warn(e); }
+    userIdRef.current = null;
     setUser(null);
     setApiKey(null);
   };
@@ -196,6 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }, { onConflict: 'user_id' });
 
     if (error) throw error;
+    // Update local state immediately
     setApiKey(key);
   };
 
