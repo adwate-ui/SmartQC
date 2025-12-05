@@ -8,10 +8,10 @@ import Login from './components/Login';
 import ApiKeyModal from './components/ApiKeyModal';
 import { useProductManager } from './hooks/useProductManager';
 import { useAuth } from './contexts/AuthContext';
-import { LogOut, User as UserIcon } from 'lucide-react';
+import { LogOut, User as UserIcon, Loader2 } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { user, apiKey, logout, isAuthenticated } = useAuth();
+  const { user, apiKey, logout, isAuthenticated, loading } = useAuth();
   
   // Only initialize product manager if user exists
   const {
@@ -32,12 +32,24 @@ const AppContent: React.FC = () => {
     setView('product_detail');
   };
 
-  // 1. Check Authentication
+  // 1. Show Loading Spinner while Auth/Key is initializing
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
+          <p className="text-slate-500 font-medium">Loading SmartQC...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Check Authentication
   if (!isAuthenticated) {
     return <Login />;
   }
 
-  // 2. Check API Key (Modal Overlay)
+  // 3. Check API Key (Modal Overlay)
   const showApiKeyModal = !apiKey;
 
   const renderContent = () => {
