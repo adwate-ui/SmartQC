@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { ProductDetails, QCReport, QCStatus, AiMode } from "../types";
 import { extractOgImage } from "../utils";
@@ -144,22 +143,31 @@ const generateWithFallback = async (
   } catch (error: any) {
     console.warn(`Gemini Request Failed (Model: ${modelName}, Thinking: ${useThinking}). Error:`, error);
     
+    // Expanded error checks to include 503 (Service Unavailable) and Overloaded states
     const isInternalError = 
       error.message?.includes('500') || 
+      error.message?.includes('503') || 
       error.message?.includes('Internal error') || 
+      error.message?.includes('Service Unavailable') ||
+      error.message?.includes('Overloaded') ||
       error.status === 500 ||
-      error.code === 500;
+      error.status === 503 ||
+      error.code === 500 ||
+      error.code === 503;
 
     const isQuotaError = 
       error.message?.includes('429') || 
       error.status === 429 ||
       error.code === 429;
 
+    // Level 1 Fallback: Detailed Mode (Thinking) -> Standard Mode (No Thinking)
     if (useThinking && isInternalError) {
       console.log("⚠️ Fallback: Retrying request WITHOUT Thinking Mode...");
       return generateWithFallback(apiKey, modelName, generateParams, false);
     }
 
+    // Level 2 Fallback: Standard Mode (Pro) -> Fast Mode (Flash)
+    // Triggers on Quota limits (429) OR Server Errors (500/503)
     if ((isQuotaError || isInternalError) && modelName.includes('pro')) {
       console.log("⚠️ Fallback: Switching to Gemini 2.5 Flash due to Quota/Error...");
       return generateWithFallback(apiKey, "gemini-2.5-flash", generateParams, false);
