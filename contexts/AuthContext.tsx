@@ -120,22 +120,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const saveApiKey = async (key: string) => {
-    if (!user) return;
+    // 1. Get the current user directly from Supabase to ensure no state staleness
+    const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !currentUser) {
+      console.error("Save API Key Error: No authenticated user found.");
+      throw new Error("User not authenticated");
+    }
     
-    // Upsert the API Key into user_settings table
+    // 2. Upsert the API Key into user_settings table
     const { error } = await supabase
       .from('user_settings')
       .upsert({ 
-        user_id: user.id, 
+        user_id: currentUser.id, 
         gemini_api_key: key,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id' });
+      }, { onConflict: 'user_id' })
+      .select();
 
     if (error) {
-      console.error("Failed to save API Key:", error);
+      console.error("Failed to save API Key to DB:", error);
       throw error;
     }
     
+    // 3. Update local state only after successful DB write
     setApiKey(key);
   };
 
