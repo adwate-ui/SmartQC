@@ -24,35 +24,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Helper: Get API Key
+  const fetchApiKey = async (userId: string): Promise<string | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('gemini_api_key')
+        .eq('user_id', userId)
+        .single();
+      
+      if (error) {
+        // code PGRST116 means 0 rows found, which is expected for new users
+        if (error.code !== 'PGRST116') {
+          console.error("DB Error fetching API Key:", error);
+        }
+        return null;
+      }
+      return data?.gemini_api_key || null;
+    } catch (e) {
+      console.error("Exception fetching API Key:", e);
+      return null;
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
 
-    const fetchUserApiKey = async (userId: string) => {
+    const initAuth = async () => {
       try {
-        const { data, error } = await supabase
-          .from('user_settings')
-          .select('gemini_api_key')
-          .eq('user_id', userId)
-          .single();
-        
-        if (mounted) {
-          if (data) {
-            setApiKey(data.gemini_api_key);
-          } else {
-            setApiKey(null);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch API key:', err);
-      }
-    };
-
-    const initializeAuth = async () => {
-      try {
-        // 1. Get initial session (Supabase v2 syntax)
+        // 1. Get Session
         const { data: { session } } = await supabase.auth.getSession();
         
         if (session?.user && mounted) {
+          // 2. Set User
           const userData: User = {
             id: session.user.id,
             email: session.user.email!,
@@ -60,22 +64,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             avatar_url: session.user.user_metadata?.avatar_url
           };
           setUser(userData);
-          await fetchUserApiKey(session.user.id);
+
+          // 3. Fetch Key (Blocking)
+          const key = await fetchApiKey(session.user.id);
+          if (mounted) setApiKey(key);
         }
       } catch (e) {
-        console.error("Auth init error:", e);
+        console.error("Auth init failed:", e);
       } finally {
         if (mounted) setLoading(false);
       }
     };
 
-    initializeAuth();
+    initAuth();
 
-    // 2. Set up listener (Supabase v2 syntax)
+    // 4. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+      if (event === 'SIGNED_IN') {
+        // Force loading true while we resolve the user profile and key
+        setLoading(true);
         if (session?.user) {
           const userData: User = {
             id: session.user.id,
@@ -84,40 +93,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             avatar_url: session.user.user_metadata?.avatar_url
           };
           setUser(userData);
-          await fetchUserApiKey(session.user.id);
+          const key = await fetchApiKey(session.user.id);
+          setApiKey(key);
         }
+        setLoading(false);
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setApiKey(null);
+        setLoading(false);
       }
-      
-      setLoading(false);
     });
-
-    // 3. Safety Timeout: Force loading to false after 5s if anything hangs
-    const safetyTimeout = setTimeout(() => {
-        if (mounted) setLoading(false);
-    }, 5000);
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
-      clearTimeout(safetyTimeout);
     };
   }, []);
 
-  // --- Auto-Logout on Inactivity Logic ---
+  // --- Auto-Logout ---
   useEffect(() => {
     if (!user) return;
-
-    // 30 minutes in milliseconds
     const INACTIVITY_LIMIT = 30 * 60 * 1000; 
     let timeoutId: any;
 
     const triggerLogout = () => {
       logout();
+      // Only alert if page is visible
       if (document.visibilityState === 'visible') {
-         alert("Session timed out due to inactivity.");
+         // Using console warn instead of alert to be less intrusive on wake
+         console.warn("Session timed out due to inactivity.");
       }
     };
 
@@ -126,36 +130,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       timeoutId = setTimeout(triggerLogout, INACTIVITY_LIMIT);
     };
 
-    // Events that count as activity
     const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove', 'click'];
-
-    // Attach listeners
-    events.forEach(event => {
-      window.addEventListener(event, resetTimer);
-    });
-
-    // Start the timer
+    events.forEach(event => window.addEventListener(event, resetTimer));
     resetTimer();
 
-    // Cleanup
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
-      events.forEach(event => {
-        window.removeEventListener(event, resetTimer);
-      });
+      events.forEach(event => window.removeEventListener(event, resetTimer));
     };
   }, [user]);
 
   const login = async (email: string, password: string) => {
     setError(null);
-    // Supabase v2 syntax
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
   };
 
   const signUp = async (email: string, password: string, name: string) => {
     setError(null);
-    // Supabase v2 syntax
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -166,33 +158,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithGoogle = async () => {
     setError(null);
-    // Supabase v2 syntax
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-    });
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
     if (error) throw error;
   };
 
   const logout = async () => {
     try {
       await supabase.auth.signOut();
-    } catch (e) {
-      console.warn("Logout network error:", e);
-    } finally {
-      setUser(null);
-      setApiKey(null);
-    }
+    } catch (e) { console.warn(e); }
+    setUser(null);
+    setApiKey(null);
   };
 
   const saveApiKey = async (key: string) => {
-    // Supabase v2 syntax: getUser is async
-    const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) throw new Error("No authenticated user.");
 
-    if (userError || !currentUser) {
-      console.error("Save API Key Error: No authenticated user found.");
-      throw new Error("User not authenticated");
-    }
-    
     const { error } = await supabase
       .from('user_settings')
       .upsert({ 
@@ -201,26 +182,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updated_at: new Date().toISOString()
       }, { onConflict: 'user_id' });
 
-    if (error) {
-      console.error("Failed to save API Key to DB:", error);
-      throw error;
-    }
-    
+    if (error) throw error;
     setApiKey(key);
   };
 
   return (
     <AuthContext.Provider value={{ 
-      user, 
-      apiKey, 
-      login, 
-      signUp,
-      loginWithGoogle, 
-      logout, 
-      saveApiKey,
-      isAuthenticated: !!user,
-      loading,
-      error
+      user, apiKey, login, signUp, loginWithGoogle, logout, saveApiKey,
+      isAuthenticated: !!user, loading, error
     }}>
       {children}
     </AuthContext.Provider>
@@ -229,8 +198,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
