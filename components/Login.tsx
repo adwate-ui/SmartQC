@@ -1,18 +1,52 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Mail, Lock, CircuitBoard } from 'lucide-react';
+import { Mail, Lock, CircuitBoard, Loader2, AlertCircle } from 'lucide-react';
 
 const Login: React.FC = () => {
-  const { login, loginWithGoogle } = useAuth();
+  const { login, signUp, loginWithGoogle, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
   const [isEmailMode, setIsEmailMode] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+      </div>
+    );
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email && name) {
-      login(email, name);
+    setError(null);
+    setIsLoading(true);
+    try {
+      if (isSignUp) {
+        if (!name) throw new Error("Name is required");
+        await signUp(email, password, name);
+        // Supabase might require email confirmation
+        alert("Account created! Please check your email for confirmation before signing in.");
+        setIsEmailMode(false); 
+      } else {
+        await login(email, password);
+      }
+    } catch (err: any) {
+      setError(err.message || "Authentication failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      setError(err.message || "Google login failed");
     }
   };
 
@@ -27,9 +61,16 @@ const Login: React.FC = () => {
           <p className="text-slate-500 mt-2">AI-Powered Product Identity & Inspection</p>
         </div>
 
+        {error && (
+          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
+            <AlertCircle size={16} />
+            {error}
+          </div>
+        )}
+
         <div className="space-y-4">
           <button 
-            onClick={loginWithGoogle}
+            onClick={handleGoogleLogin}
             className="w-full flex items-center justify-center gap-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium py-3 rounded-xl transition-all active:scale-95"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -59,17 +100,19 @@ const Login: React.FC = () => {
              </button>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
-                <input 
-                  type="text" 
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="John Doe"
-                  required
-                />
-              </div>
+              {isSignUp && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
+                  <input 
+                    type="text" 
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="John Doe"
+                    required
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
                 <div className="relative">
@@ -89,25 +132,41 @@ const Login: React.FC = () => {
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input 
-                    type="password" 
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="••••••••"
+                    required
+                    minLength={6}
                   />
                 </div>
               </div>
               <button 
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-all shadow-md active:scale-95"
+                disabled={isLoading}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-3 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
               >
-                Sign In
+                {isLoading && <Loader2 size={18} className="animate-spin" />}
+                {isSignUp ? 'Create Account' : 'Sign In'}
               </button>
-              <button 
-                type="button"
-                onClick={() => setIsEmailMode(false)}
-                className="w-full text-slate-500 text-sm hover:text-slate-700"
-              >
-                Back
-              </button>
+              
+              <div className="flex items-center justify-between text-sm">
+                <button 
+                  type="button"
+                  onClick={() => setIsEmailMode(false)}
+                  className="text-slate-500 hover:text-slate-700"
+                >
+                  Back
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setIsSignUp(!isSignUp)}
+                  className="text-blue-600 font-medium hover:underline"
+                >
+                  {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
+                </button>
+              </div>
             </form>
           )}
         </div>

@@ -1,18 +1,29 @@
+
 import React, { useState } from 'react';
-import { Key, ShieldCheck, Info } from 'lucide-react';
+import { Key, ShieldCheck, Info, Loader2 } from 'lucide-react';
 import Tooltip from './Tooltip';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ApiKeyModalProps {
-  onSave: (key: string) => void;
+  onSave?: (key: string) => void;
 }
 
-const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ onSave }) => {
+const ApiKeyModal: React.FC<ApiKeyModalProps> = () => {
+  const { saveApiKey } = useAuth();
   const [inputKey, setInputKey] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (inputKey.trim().length > 10) {
-      onSave(inputKey.trim());
+      setSaving(true);
+      try {
+        await saveApiKey(inputKey.trim());
+      } catch (e) {
+        alert("Failed to save API key. Please try again.");
+      } finally {
+        setSaving(false);
+      }
     }
   };
 
@@ -33,7 +44,7 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ onSave }) => {
           <div>
             <div className="flex items-center justify-between mb-1">
                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">API Key</label>
-               <Tooltip content="Your key is stored ONLY in your browser's Local Storage. We do not transmit it to any backend server." position="left">
+               <Tooltip content="Your key is encrypted and stored in your account database. We do not use it for anything other than your requests." position="left">
                  <Info size={12} className="text-slate-400 cursor-help" />
                </Tooltip>
             </div>
@@ -49,10 +60,11 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ onSave }) => {
 
           <button 
             type="submit"
-            disabled={inputKey.length < 10}
+            disabled={inputKey.length < 10 || saving}
             className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-3 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
           >
-            <ShieldCheck size={18} /> Save & Continue
+            {saving ? <Loader2 className="animate-spin" /> : <ShieldCheck size={18} />} 
+            Save & Continue
           </button>
         </form>
         

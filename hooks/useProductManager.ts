@@ -1,7 +1,8 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Product, ViewState, AiMode } from '../types';
 import { identifyProductFromMedia, performQualityControl, fileToBase64 } from '../services/geminiService';
+import { supabase } from '../lib/supabaseClient';
 
 export const useProductManager = (userId: string | undefined, apiKey: string | null) => {
   const [view, setView] = useState<ViewState>('dashboard');
@@ -10,38 +11,76 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
   const [aiMode, setAiMode] = useState<AiMode>('detailed');
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
 
-  const storageKey = userId ? `smartqc_products_${userId}` : null;
-
-  // Load from LocalStorage specific to user
+  // Fetch Products from Supabase on load
   useEffect(() => {
-    if (storageKey) {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        try {
-          setProducts(JSON.parse(saved));
-        } catch (e) {
-          console.error("Failed to parse saved products", e);
-          setProducts([]);
-        }
-      } else {
-        setProducts([]);
-      }
-    } else {
+    if (!userId) {
       setProducts([]);
+      return;
     }
-  }, [storageKey]);
 
-  // Save to LocalStorage specific to user
-  useEffect(() => {
-    if (storageKey) {
-      localStorage.setItem(storageKey, JSON.stringify(products));
-    }
-  }, [products, storageKey]);
+    const fetchProducts = async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error("Error fetching products:", error);
+      } else if (data) {
+        // Map DB rows back to Product objects (unwrapping the 'content' jsonb column)
+        const loadedProducts = data.map((row: any) => ({
+          ...row.content,
+          id: row.id // Ensure we use the real DB ID
+        }));
+        setProducts(loadedProducts);
+      }
+    };
+
+    fetchProducts();
+  }, [userId]);
+
+  const saveProductToDb = async (product: Product) => {
+    if (!userId) return;
+    
+    // We store the Product JSON in the 'content' column
+    // and use the ID as the primary key.
+    const { error } = await supabase
+      .from('products')
+      .upsert({
+        id: product.id,
+        user_id: userId,
+        content: product,
+        created_at: new Date(product.createdAt).toISOString()
+      });
+
+    if (error) console.error("Error saving product:", error);
+  };
+
+  const deleteProductsFromDb = async (ids: string[]) => {
+    if (!userId) return;
+    const { error } = await supabase
+      .from('products')
+      .delete()
+      .in('id', ids);
+
+    if (error) console.error("Error deleting products:", error);
+  };
 
   const selectedProduct = products.find(p => p.id === selectedProductId) || null;
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    setProducts(prev => {
+      const next = prev.map(p => {
+        if (p.id === id) {
+          const updated = { ...p, ...updates };
+          // Fire and forget save to DB
+          saveProductToDb(updated);
+          return updated;
+        }
+        return p;
+      });
+      return next;
+    });
   };
 
   const handleToggleSelection = (id: string) => {
@@ -54,10 +93,15 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
     setSelectedProductIds(newSet);
   };
 
-  const handleDeleteSelected = (idsToDelete: Set<string>) => {
+  const handleDeleteSelected = async (idsToDelete: Set<string>) => {
     if (idsToDelete.size === 0) return;
+    
+    // Optimistic Update
     setProducts(prev => prev.filter(p => !idsToDelete.has(p.id)));
     setSelectedProductIds(new Set());
+
+    // Sync to DB
+    await deleteProductsFromDb(Array.from(idsToDelete));
   };
 
   const simulateProgress = (productId: string) => {
@@ -119,7 +163,9 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
       progress: 10
     };
 
+    // Optimistic Add
     setProducts(prev => [newProduct, ...prev]);
+    saveProductToDb(newProduct);
     setView('dashboard');
 
     simulateProgress(tempId);
@@ -181,17 +227,22 @@ export const useProductManager = (userId: string | undefined, apiKey: string | n
         isExpertMode
       );
 
-      setProducts(prev => prev.map(p => {
-        if (p.id === product.id) {
-          return {
-            ...p,
-            qcReports: [report, ...p.qcReports],
-            processingStatus: 'idle',
-            progress: 100
-          };
-        }
-        return p;
-      }));
+      setProducts(prev => {
+        const next = prev.map(p => {
+          if (p.id === product.id) {
+            const updated = {
+              ...p,
+              qcReports: [report, ...p.qcReports],
+              processingStatus: 'idle' as const,
+              progress: 100
+            };
+            saveProductToDb(updated);
+            return updated;
+          }
+          return p;
+        });
+        return next;
+      });
 
     } catch (err: any) {
       console.error("Background QC Error:", err);

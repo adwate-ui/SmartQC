@@ -70,6 +70,6 @@ export type AiMode = 'fast' | 'detailed';
 export interface User {
   id: string;
   email: string;
-  name: string;
-  avatar?: string;
+  name?: string;
+  avatar_url?: string;
 }
